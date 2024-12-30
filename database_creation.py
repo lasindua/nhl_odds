@@ -1,5 +1,7 @@
 import requests
+import time
 from pymongo import MongoClient
+from pymongo import UpdateOne
 from pymongo.server_api import ServerApi
 from pymongo.errors import DuplicateKeyError
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -24,42 +26,49 @@ team_list_codes = ["ANA", "BOS", "BUF", "CAR", "CBJ", "CGY", "CHI", "COL",
                    "STL", "TBL", "TOR", "UTA", "VAN", "VGK", "WPG", "WSH"]
 
 # Initialize list and formatted URL
-team_info = []
-team_url = 'https://api-web.nhle.com/v1/roster/{team}/20232024'
+team_url = 'https://api-web.nhle.com/v1/roster/{team}/20242025'
 
 info.create_index('team_code', unique=True)
-for team in team_list_codes:
+
+def fetch_team_info (team):
     url = team_url.format(team=team)
     try:
         response = requests.get(url)
         response.raise_for_status()
         team_rost = response.json()
         team_rost['team_code'] = team
-        info.insert_one(team_rost)
+
         print(f'Fetched data for team {team}')
-    except DuplicateKeyError:
-        print(f'Data for team {team} already exists. Skipping')
+        return team_rost
+    
     except requests.exceptions.RequestException as e:
         print(f'Failed to fetch data for team {team}: {e}')
+        return None
 
+team_info = []
 
-delete_result = info.delete_many({"team_code": {"$exists": False}})
-print(f'Deleted {delete_result.deleted_count} documents without "team_code"')
+with ThreadPoolExecutor(max_workers=5) as executor:
+    futures = [executor.submit(fetch_team_info, team) for team in team_list_codes]
 
-pipeline = [
-    {'$group':
-     {'_id': '$team_code',
-      'count':{'$sum':1},
-      'docs': {'$push': '$_id'}
-      }},
-      {'$match': {'count':{'$gt': 1}}}
-]
-duplicates = list(info.aggregate(pipeline))
-for dup in duplicates:
-    remove_id = dup['docs'][1:]
-    info.delete_many({'_id': {'$in': remove_id}})
+    for future in as_completed(futures):
+        result = future.result()
+        if result:
+            team_info.append(result)
 
-print(f'Removed duplicate documents')
+if team_info:
+    bulk_write = [
+            UpdateOne(
+                {'team_code': team['team_code']},
+                {'$set': team},
+                upsert=True
+            )
+            for team in team_info
+    ]
+        
+    if bulk_write:
+        info.bulk_write(bulk_write)
+        print(f'Bulk update complete: {result}')
+
 
 stats = db['player_game_logs']
 player_ids = []
@@ -76,6 +85,8 @@ current_season = 20242025
 fetch_season = [current_season, 20232024, 20222023]
 game_log_url = 'https://api-web.nhle.com/v1/player/{player_id}/game-log/{season}/2'
 
+
+
 def game_log_fetch (player_id):
     player_doc = {'player_id': player_id, 'game_logs':{}}
     
@@ -85,9 +96,13 @@ def game_log_fetch (player_id):
             response = requests.get(game_url)
             response.raise_for_status()
             game_log = response.json()
-
-            player_doc['game_logs'][str(season)] = game_log['gameLog']
-            print(f'Fetched game logs for player {player_id}, from the {season} season.')
+            
+            if 'gameLog' in game_log:
+                player_doc['game_logs'][str(season)] = game_log['gameLog']
+                print(f'Fetched game logs for player {player_id}, from the {season} season.')
+            else:
+                print(f'"game_log" not found for player {player_id}, season {season}. Response: {game_log}')
+                player_doc['game_logs'][str(season)] = []
         except requests.exceptions.RequestException as e:
             print(f'Failed to fetch game logs for player {player_id}, from the {season} season: {e}')
     return player_doc
@@ -102,5 +117,21 @@ with ThreadPoolExecutor(max_workers=10) as executor:
             season_game_logs.append(result)
 
 if season_game_logs:
-    stats.insert_many(season_game_logs)
-    print(f'Inserted {len(season_game_logs)} player game log documents.')
+    bulk_operations = []
+    for player_games in season_game_logs:
+        bulk_operations.append(
+            UpdateOne(
+                {'player_id':player_games['player_id']},
+                {'$set': player_games},
+                upsert=True
+            )
+        )
+    start_time = time.time()
+    if bulk_operations:
+        result = stats.bulk_write(bulk_operations)
+        print(f'Bulk update complete: {result}')
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f'Bulk write took {elapsed_time:.3f} seconds to execute')
+
+
