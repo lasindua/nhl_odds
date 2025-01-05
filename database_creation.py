@@ -1,5 +1,6 @@
 import requests
 import time
+import pandas as pd
 from pymongo import MongoClient
 from pymongo import UpdateOne
 from pymongo.server_api import ServerApi
@@ -45,29 +46,33 @@ def fetch_team_info (team):
         print(f'Failed to fetch data for team {team}: {e}')
         return None
 
-team_info = []
+def team_storage ():
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        team_info = []
 
-with ThreadPoolExecutor(max_workers=5) as executor:
-    futures = [executor.submit(fetch_team_info, team) for team in team_list_codes]
+        futures = [executor.submit(fetch_team_info, team) for team in team_list_codes]
 
-    for future in as_completed(futures):
-        result = future.result()
-        if result:
-            team_info.append(result)
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                team_info.append(result)
 
-if team_info:
-    bulk_write = [
-            UpdateOne(
-                {'team_code': team['team_code']},
-                {'$set': team},
-                upsert=True
-            )
-            for team in team_info
-    ]
-        
-    if bulk_write:
-        info.bulk_write(bulk_write)
-        print(f'Bulk update complete: {result}')
+    if team_info:
+        bulk_write = [
+                UpdateOne(
+                    {'team_code': team['team_code']},
+                    {'$set': team},
+                    upsert=True
+                )
+                for team in team_info
+        ]
+            
+        if bulk_write:
+            try:
+                info.bulk_write(bulk_write)
+                print(f'Bulk update complete: {result}')
+            except Exception as e:
+                print(f'Error handling database write: {e}')
 
 
 stats = db['player_game_logs']
@@ -107,31 +112,42 @@ def game_log_fetch (player_id):
             print(f'Failed to fetch game logs for player {player_id}, from the {season} season: {e}')
     return player_doc
 
-with ThreadPoolExecutor(max_workers=10) as executor:
-    futures = [executor.submit(game_log_fetch, player_id) for player_id in player_ids]
+def game_log_storage ():
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(game_log_fetch, player_id) for player_id in player_ids]
 
-    season_game_logs = []
-    for future in as_completed(futures):
-        result = future.result()
-        if result:
-            season_game_logs.append(result)
+        season_game_logs = []
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                season_game_logs.append(result)
 
-if season_game_logs:
-    bulk_operations = []
-    for player_games in season_game_logs:
-        bulk_operations.append(
-            UpdateOne(
-                {'player_id':player_games['player_id']},
-                {'$set': player_games},
-                upsert=True
+    if season_game_logs:
+        bulk_operations = []
+        for player_games in season_game_logs:
+            bulk_operations.append(
+                UpdateOne(
+                    {'player_id':player_games['player_id']},
+                    {'$set': player_games},
+                    upsert=True
+                )
             )
-        )
-    start_time = time.time()
-    if bulk_operations:
-        result = stats.bulk_write(bulk_operations)
-        print(f'Bulk update complete: {result}')
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    print(f'Bulk write took {elapsed_time:.3f} seconds to execute')
+        start_time = time.time()
+        if bulk_operations:
+            try:
+                result = stats.bulk_write(bulk_operations)
+                print(f'Bulk update complete: {result}')
+            except Exception as e:
+                print(f'Error handling database write: {e}')
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f'Bulk write took {elapsed_time:.3f} seconds to execute')
+
+if __name__ == '__main__':
+    print('Starting the script to fetch and store team data...')
+    team_storage()
+    game_log_storage()
+    print('Script execution complete')
 
 
+money_puck = pd.read_csv('https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv')
