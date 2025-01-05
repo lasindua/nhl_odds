@@ -1,6 +1,8 @@
 import requests
 import time
 import pandas as pd
+import zipfile
+from io import BytesIO
 from pymongo import MongoClient
 from pymongo import UpdateOne
 from pymongo.server_api import ServerApi
@@ -143,6 +145,49 @@ def game_log_storage ():
         elapsed_time = end_time - start_time
         print(f'Bulk write took {elapsed_time:.3f} seconds to execute')
 
+# money_puck = pd.read_csv('https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv')
+
+shot_zip_files = ['https://peter-tanner.com/moneypuck/downloads/shots_2022.zip',
+                  'https://peter-tanner.com/moneypuck/downloads/shots_2023.zip',
+                  'https://peter-tanner.com/moneypuck/downloads/shots_2024.zip']
+
+
+shot_log = db['shot_log']
+
+shot_log.create_index('shooterPlayerID')
+
+def zip_process (zip_url):
+    try:
+        print(f'Processing zip file from: {zip_url}')
+        response = requests.get(zip_url)
+        response.raise_for_status()
+    
+        with zipfile.ZipFile(BytesIO(response.content)) as z:
+            file_names = z.namelist()
+            print(f'Files in the zip file: {file_names}')
+
+
+            for file in file_names:
+                if file.endswith('.csv'):
+                    print(f'Processing {file}...')
+                    with z.open(file) as f:
+                        df = pd.read_csv(f)
+
+                        converted_df = df.to_dict(orient='records')
+
+                        for i in range(0, len(converted_df), 1000):
+                            shot_log.insert_many(converted_df[i:i+1000])
+                            print(f'Inserted chunk of {len(converted_df[i:i+1000])} records from {file}')
+
+    except requests.exceptions.RequestException as e:
+        print(f'Failed to download zip file from {zip_url}: {e}')
+
+    except zipfile.BadZipFile as e:
+        print(f'Invalid zip file from {zip_url}: {e}')
+
+for zip_url in shot_zip_files:
+    zip_process(zip_url)
+
 if __name__ == '__main__':
     print('Starting the script to fetch and store team data...')
     team_storage()
@@ -150,4 +195,3 @@ if __name__ == '__main__':
     print('Script execution complete')
 
 
-money_puck = pd.read_csv('https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv')
