@@ -154,6 +154,8 @@ shot_zip_files = ['https://peter-tanner.com/moneypuck/downloads/shots_2022.zip',
 
 shot_log = db['shot_log']
 
+columns_to_extract = ['shooterPlayerId', 'xGoal', 'shotWasOnGoal', 'homeTeamCode', 'awayTeamCode', 'shotID', 'season']
+
 shot_log.create_index('shooterPlayerID')
 
 def zip_process (zip_url):
@@ -171,27 +173,45 @@ def zip_process (zip_url):
                 if file.endswith('.csv'):
                     print(f'Processing {file}...')
                     with z.open(file) as f:
-                        df = pd.read_csv(f)
+                        df = pd.read_csv(f, usecols = columns_to_extract)
 
                         converted_df = df.to_dict(orient='records')
+                        
+                        bulk_operations = []
 
-                        for i in range(0, len(converted_df), 1000):
-                            shot_log.insert_many(converted_df[i:i+1000])
-                            print(f'Inserted chunk of {len(converted_df[i:i+1000])} records from {file}')
+                        for record in converted_df:
+                            bulk_operations.append(
+                                UpdateOne(
+                                    {'shooterPlayerId':record['shooterPlayerId'], 'shotID':record['shotID'], 'season':record['season']},
+                                     {'$set': record},
+                                     upsert=True
+                                )
+                            )
+
+                        if bulk_operations:
+                            result = shot_log.bulk_write(bulk_operations)
+                            print(f'Matched: {result.matched_count}, Upserted: {result.upserted_count}, Modified: {result.modified_count}')
+        print(f'Completed processing zip file: {zip_url}')
 
     except requests.exceptions.RequestException as e:
         print(f'Failed to download zip file from {zip_url}: {e}')
 
     except zipfile.BadZipFile as e:
         print(f'Invalid zip file from {zip_url}: {e}')
+    
+    except ValueError as e:
+        print(f'Error while processing CSV: {e}')
 
-for zip_url in shot_zip_files:
-    zip_process(zip_url)
 
 if __name__ == '__main__':
     print('Starting the script to fetch and store team data...')
+
     team_storage()
+
     game_log_storage()
+    
+    for zip_url in shot_zip_files:
+        zip_process(zip_url)
     print('Script execution complete')
 
 
