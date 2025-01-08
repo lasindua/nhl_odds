@@ -145,7 +145,7 @@ def game_log_storage ():
         elapsed_time = end_time - start_time
         print(f'Bulk write took {elapsed_time:.3f} seconds to execute')
 
-# money_puck = pd.read_csv('https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv')
+money_puck = pd.read_csv('https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv')
 
 shot_zip_files = ['https://peter-tanner.com/moneypuck/downloads/shots_2022.zip',
                   'https://peter-tanner.com/moneypuck/downloads/shots_2023.zip',
@@ -176,21 +176,21 @@ def zip_process (zip_url):
                         df = pd.read_csv(f, usecols = columns_to_extract)
 
                         converted_df = df.to_dict(orient='records')
-                        
-                        bulk_operations = []
 
-                        for record in converted_df:
-                            bulk_operations.append(
-                                UpdateOne(
-                                    {'shooterPlayerId':record['shooterPlayerId'], 'shotID':record['shotID'], 'season':record['season']},
-                                     {'$set': record},
-                                     upsert=True
-                                )
-                            )
+                        season = converted_df[0]['season']
 
-                        if bulk_operations:
-                            result = shot_log.bulk_write(bulk_operations)
-                            print(f'Matched: {result.matched_count}, Upserted: {result.upserted_count}, Modified: {result.modified_count}')
+                        start_time = time.time()
+
+                        shot_log.delete_many({'season': season})
+                        print(f'Deleted all records for season: {season} ')
+
+                        chunk_size = 5000
+                        for i in range(0,len(converted_df), chunk_size):
+                            shot_log.insert_many(converted_df[i:i+chunk_size])
+                            print(f'Inserted chunk of {len(converted_df[i:i+chunk_size])} records from {file}')
+                        end_time = time.time()
+                        elapsed_time = end_time - start_time
+                        print(f'Bulk write took: {elapsed_time:.3f} to complete')
         print(f'Completed processing zip file: {zip_url}')
 
     except requests.exceptions.RequestException as e:
@@ -209,7 +209,7 @@ if __name__ == '__main__':
     team_storage()
 
     game_log_storage()
-    
+
     for zip_url in shot_zip_files:
         zip_process(zip_url)
     print('Script execution complete')
