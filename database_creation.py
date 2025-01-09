@@ -145,7 +145,7 @@ def game_log_storage ():
         elapsed_time = end_time - start_time
         print(f'Bulk write took {elapsed_time:.3f} seconds to execute')
 
-money_puck = pd.read_csv('https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv')
+#money_puck = pd.read_csv('https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv')
 
 shot_zip_files = ['https://peter-tanner.com/moneypuck/downloads/shots_2022.zip',
                   'https://peter-tanner.com/moneypuck/downloads/shots_2023.zip',
