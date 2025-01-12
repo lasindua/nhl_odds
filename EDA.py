@@ -16,7 +16,7 @@ except Exception as e:
 
 db = client['NHL']
 
-game_log_pointer = db['player_game_logs'].find({}, {'_id':0})
+game_log_pointer = db['team_game_logs'].find({}, {'_id':0})
 
 game_log_data = list(game_log_pointer)
 
@@ -33,17 +33,25 @@ print(game_log_df.head())
 print('Shot Log DataFrame')
 print(shot_df.head())
 
-group_shot_log = shot_df.groupby(['shooterPlayerId', 'season']).apply(lambda x: x.to_dict(orient='records')).reset_index(name = 'shot_logs')
+game_log_df = game_log_df['gameId'].apply(lambda x: f'{int(str(x)[:4])}0{int(str(x)[4:]):04d}')
 
-group_shot_log = group_shot_log.groupby('shooterPlayerId'
-                                        ).apply(lambda x: {season: logs for season, logs in zip(x['season'], x['shot_logs'])}
-                                        ).reset_index(name='game_logs')
 merged_df = pd.merge(
+    shot_df,
     game_log_df,
-    group_shot_log,
-    left_on = 'player_id',
-    right_on = 'shooterPlayerId',
-    how = 'left'
+    left_on = 'shot_game_ID',
+    right_on = 'gameId',
+    how = 'left',
+    suffixes=('_shot','_game')
 )
 
-print(merged_df.head())
+ordered_columns = ['shooterPlayerId', 'shot_game_ID'] + \
+                  [col for col in merged_df.columns if col not in ['shooterPlayerId', 'shot_game_ID']]
+merged_df = merged_df[ordered_columns]
+
+# Step 3: Group by shooterPlayerId and shot_game_ID (repeated measures structure)
+repeated_measures_df = merged_df.groupby(['shooterPlayerId', 'shot_game_ID']).apply(
+    lambda x: x.reset_index(drop=True)
+).reset_index(drop=True)
+
+print("Repeated Measures DataFrame")
+print(repeated_measures_df.head())

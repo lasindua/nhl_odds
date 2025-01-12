@@ -2,7 +2,7 @@ import requests
 import time
 import pandas as pd
 import zipfile
-from io import BytesIO
+from io import BytesIO, StringIO
 from pymongo import MongoClient
 from pymongo import UpdateOne
 from pymongo.server_api import ServerApi
@@ -77,7 +77,7 @@ def team_storage ():
                 print(f'Error handling database write: {e}')
 
 
-stats = db['player_game_logs']
+stats = db['team_game_logs']
 player_ids = []
 
 for player in info.find():
@@ -88,11 +88,41 @@ for player in info.find():
 
 print(f'Extracted {len(player_ids)} Player IDs')
 
+money_puck = 'https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv'
+header = {'User-Agent':'Mozilla/5.0'}
+
+def team_game_log(url, head):
+    try:
+
+        access = requests.get(url,headers=head)
+
+        if access.status_code == 200:
+            MP_file = pd.read_csv(StringIO(access.text))
+            MP_file_filtered = MP_file[MP_file['season'].isin([2022,2023,2024])]
+            MP_dict = MP_file_filtered.to_dict(orient='records')
+
+            season = MP_dict[0]['season']
+
+            stats.delete_many({})
+            print(f'Deleted all records from collection')
+
+            chunk_size=5000
+            for i in range(0,len(MP_dict), chunk_size):
+                batch_size = MP_dict[i:i + chunk_size]
+                stats.insert_many(batch_size)
+                print(f'Inserted MoneyPuck team level game logs. {i//chunk_size+1} with {len(batch_size)} records')
+        else:
+            print(f'Unable to fetch data. Status code: {access.status_code}')
+    except Exception as e:
+        print(f'An error occured: {e}')
+    
+
+
+
+'''
 current_season = 20242025
 fetch_season = [current_season, 20232024, 20222023]
 game_log_url = 'https://api-web.nhle.com/v1/player/{player_id}/game-log/{season}/2'
-
-
 
 def game_log_fetch (player_id):
     player_doc = {'player_id': player_id, 'game_logs':{}}
@@ -144,8 +174,8 @@ def game_log_storage ():
         end_time = time.time()
         elapsed_time = end_time - start_time
         print(f'Bulk write took {elapsed_time:.3f} seconds to execute')
+'''
 
-#money_puck = pd.read_csv('https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv')
 
 shot_zip_files = ['https://peter-tanner.com/moneypuck/downloads/shots_2022.zip',
                   'https://peter-tanner.com/moneypuck/downloads/shots_2023.zip',
@@ -154,7 +184,7 @@ shot_zip_files = ['https://peter-tanner.com/moneypuck/downloads/shots_2022.zip',
 
 shot_log = db['shot_log']
 
-columns_to_extract = ['shooterPlayerId', 'xGoal', 'shotWasOnGoal', 'homeTeamCode', 'awayTeamCode', 'shotID', 'season']
+columns_to_extract = ['shooterPlayerId', 'xGoal', 'shotWasOnGoal', 'homeTeamCode', 'awayTeamCode', 'shotID', 'season', 'game_id']
 
 shot_log.create_index('shooterPlayerID')
 
@@ -174,6 +204,10 @@ def zip_process (zip_url):
                     print(f'Processing {file}...')
                     with z.open(file) as f:
                         df = pd.read_csv(f, usecols = columns_to_extract)
+
+                        df['shot_game_ID'] = df.apply(
+                            lambda row: f"{int(row['season'])}0{int(row['game_id']):04d}", axis=1
+                        )
 
                         converted_df = df.to_dict(orient='records')
 
@@ -208,7 +242,7 @@ if __name__ == '__main__':
 
     team_storage()
 
-    game_log_storage()
+    team_game_log(money_puck, header)
 
     for zip_url in shot_zip_files:
         zip_process(zip_url)
