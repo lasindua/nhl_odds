@@ -96,15 +96,16 @@ def team_game_log(url, head):
 
         access = requests.get(url,headers=head)
 
+        stats.drop()
+        print(f'Deleted all records from collection')
+
+
         if access.status_code == 200:
             MP_file = pd.read_csv(StringIO(access.text))
             MP_file_filtered = MP_file[MP_file['season'].isin([2022,2023,2024])]
             MP_dict = MP_file_filtered.to_dict(orient='records')
 
             season = MP_dict[0]['season']
-
-            stats.delete_many({})
-            print(f'Deleted all records from collection')
 
             chunk_size=5000
             for i in range(0,len(MP_dict), chunk_size):
@@ -184,9 +185,7 @@ shot_zip_files = ['https://peter-tanner.com/moneypuck/downloads/shots_2022.zip',
 
 shot_log = db['shot_log']
 
-columns_to_extract = ['shooterPlayerId', 'xGoal', 'shotWasOnGoal', 'homeTeamCode', 'awayTeamCode', 'shotID', 'season', 'game_id']
-
-shot_log.create_index('shooterPlayerID')
+columns_to_extract = ['shooterPlayerId', 'xGoal', 'shotWasOnGoal','goal', 'homeTeamCode', 'awayTeamCode', 'shotID', 'season', 'game_id']
 
 def zip_process (zip_url):
     try:
@@ -197,6 +196,9 @@ def zip_process (zip_url):
         with zipfile.ZipFile(BytesIO(response.content)) as z:
             file_names = z.namelist()
             print(f'Files in the zip file: {file_names}')
+
+            shot_log.drop()
+            print(f'Deleted all records from collection')
 
 
             for file in file_names:
@@ -215,9 +217,6 @@ def zip_process (zip_url):
 
                         start_time = time.time()
 
-                        shot_log.delete_many({'season': season})
-                        print(f'Deleted all records for season: {season} ')
-
                         chunk_size = 5000
                         for i in range(0,len(converted_df), chunk_size):
                             shot_log.insert_many(converted_df[i:i+chunk_size])
@@ -225,6 +224,8 @@ def zip_process (zip_url):
                         end_time = time.time()
                         elapsed_time = end_time - start_time
                         print(f'Bulk write took: {elapsed_time:.3f} to complete')
+            
+            shot_log.create_index('shooterPlayerID')
         print(f'Completed processing zip file: {zip_url}')
 
     except requests.exceptions.RequestException as e:

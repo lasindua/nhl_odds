@@ -2,6 +2,9 @@ import time
 import pandas as pd
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from statsmodels.tools.sm_exceptions import ConvergenceWarning
 
 
 
@@ -33,25 +36,45 @@ print(game_log_df.head())
 print('Shot Log DataFrame')
 print(shot_df.head())
 
+shot_df = shot_df[(shot_df['shooterPlayerId'] != 0) & (shot_df['shooterPlayerId'].notna())]
+shot_df['shooterPlayerId'] = shot_df['shooterPlayerId'].astype(int)
+
 game_log_df = game_log_df['gameId'].apply(lambda x: f'{int(str(x)[:4])}0{int(str(x)[4:]):04d}')
 
 merged_df = pd.merge(
-    shot_df,
     game_log_df,
-    left_on = 'shot_game_ID',
-    right_on = 'gameId',
+    shot_df,
+    left_on = 'gameId',
+    right_on = 'shot_game_ID',
     how = 'left',
     suffixes=('_shot','_game')
 )
+print('Merged Dataframe')
+print(merged_df.head())
 
-ordered_columns = ['shooterPlayerId', 'shot_game_ID'] + \
-                  [col for col in merged_df.columns if col not in ['shooterPlayerId', 'shot_game_ID']]
+duplicates = merged_df.duplicated(subset=['shooterPlayerId', 'shot_game_ID', 'shotID'])
+print(f"Number of exact duplicates: {duplicates.sum()}")
+merged_df = merged_df.drop_duplicates(subset=['shooterPlayerId', 'shot_game_ID', 'shotID'])
+
+duplicate_check = merged_df.groupby(['shooterPlayerId', 'shot_game_ID', 'shotID']).size()
+
+
+
+ordered_columns = ['shooterPlayerId', 'shot_game_ID', 'shotID'] + \
+                  [col for col in merged_df.columns if col not in ['shooterPlayerId', 'shot_game_ID', 'shotID']]
 merged_df = merged_df[ordered_columns]
 
+
 # Step 3: Group by shooterPlayerId and shot_game_ID (repeated measures structure)
-repeated_measures_df = merged_df.groupby(['shooterPlayerId', 'shot_game_ID']).apply(
+repeated_measures_df = merged_df.groupby(['shooterPlayerId', 'shot_game_ID', 'shotID']).apply(
     lambda x: x.reset_index(drop=True)
 ).reset_index(drop=True)
 
 print("Repeated Measures DataFrame")
 print(repeated_measures_df.head())
+
+repeated_measures_df['season'] = repeated_measures_df['season'].astype('category')
+
+model_1 = smf.mixedlm("goal ~ xGoal + shotWasOnGoal", repeated_measures_df, groups=repeated_measures_df['season'])
+result = model_1.fit()
+print(result.summary())
