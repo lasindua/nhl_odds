@@ -5,6 +5,7 @@ import zipfile
 from io import BytesIO, StringIO
 from pymongo import MongoClient
 from pymongo import UpdateOne
+from pymongo import InsertOne
 from pymongo.server_api import ServerApi
 from pymongo.errors import DuplicateKeyError
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -96,22 +97,15 @@ def team_game_log(url, head):
 
         access = requests.get(url,headers=head)
 
-        stats.drop()
-        print(f'Deleted all records from collection')
-
-
         if access.status_code == 200:
             MP_file = pd.read_csv(StringIO(access.text))
             MP_file_filtered = MP_file[MP_file['season'].isin([2022,2023,2024])]
             MP_dict = MP_file_filtered.to_dict(orient='records')
 
-            season = MP_dict[0]['season']
 
-            chunk_size=5000
-            for i in range(0,len(MP_dict), chunk_size):
-                batch_size = MP_dict[i:i + chunk_size]
-                stats.insert_many(batch_size)
-                print(f'Inserted MoneyPuck team level game logs. {i//chunk_size+1} with {len(batch_size)} records')
+            bulk_ops = [InsertOne(records) for records in MP_dict]
+            stats.bulk_write(bulk_ops)
+            print(f'Completed team bulk write')
         else:
             print(f'Unable to fetch data. Status code: {access.status_code}')
     except Exception as e:
@@ -197,9 +191,6 @@ def zip_process (zip_url):
             file_names = z.namelist()
             print(f'Files in the zip file: {file_names}')
 
-            shot_log.drop()
-            print(f'Deleted all records from collection')
-
 
             for file in file_names:
                 if file.endswith('.csv'):
@@ -217,15 +208,15 @@ def zip_process (zip_url):
 
                         start_time = time.time()
 
-                        chunk_size = 5000
-                        for i in range(0,len(converted_df), chunk_size):
-                            shot_log.insert_many(converted_df[i:i+chunk_size])
-                            print(f'Inserted chunk of {len(converted_df[i:i+chunk_size])} records from {file}')
+                        bulk_ops = [InsertOne(record) for record in converted_df]
+                        shot_log.bulk_write(bulk_ops)
+
                         end_time = time.time()
                         elapsed_time = end_time - start_time
                         print(f'Bulk write took: {elapsed_time:.3f} to complete')
             
             shot_log.create_index('shooterPlayerID')
+            shot_log.create_index('shot_game_ID')
         print(f'Completed processing zip file: {zip_url}')
 
     except requests.exceptions.RequestException as e:
@@ -236,8 +227,14 @@ def zip_process (zip_url):
     
     except ValueError as e:
         print(f'Error while processing CSV: {e}')
+        
 
 
+stats.drop()
+print(f'Deleted all records from collection')
+
+shot_log.drop()
+print(f'Dropped all files from collection')
 if __name__ == '__main__':
     print('Starting the script to fetch and store team data...')
 
