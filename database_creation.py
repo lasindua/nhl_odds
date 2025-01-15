@@ -99,13 +99,17 @@ def team_game_log(url, head):
 
         if access.status_code == 200:
             MP_file = pd.read_csv(StringIO(access.text))
-            MP_file_filtered = MP_file[MP_file['season'].isin([2022,2023,2024])]
+            MP_file_filtered = MP_file[
+                (MP_file['season'].isin([2022,2023,2024])) &
+                 (MP_file['situation'] =='all')]
             MP_dict = MP_file_filtered.to_dict(orient='records')
 
 
             bulk_ops = [InsertOne(records) for records in MP_dict]
             stats.bulk_write(bulk_ops)
             print(f'Completed team bulk write')
+
+            stats.create_index('gameId')
         else:
             print(f'Unable to fetch data. Status code: {access.status_code}')
     except Exception as e:

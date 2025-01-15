@@ -5,6 +5,7 @@ from pymongo.server_api import ServerApi
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
+import pprint
 
 
 
@@ -19,27 +20,36 @@ except Exception as e:
 
 db = client['NHL']
 
-game_log_pointer = db['team_game_logs'].find({}, {'_id':0})
-
+game_log_pointer = db['team_game_logs'].find({},{'_id':0})
 game_log_data = list(game_log_pointer)
-
 game_log_df = pd.DataFrame(game_log_data)
 
+
+
 shot_pointer = db['shot_log'].find({}, {'_id':0})
+
 shot_data = list(shot_pointer)
 
 shot_df = pd.DataFrame(shot_data)
 
 print('Game Log DataFrame')
+print(type(game_log_df))
 print(game_log_df.head())
 
 print('Shot Log DataFrame')
+print(type(shot_df))
 print(shot_df.head())
 
+# There were around 8 observations where the playerID was 0 or NA, so they are dropped
 shot_df = shot_df[(shot_df['shooterPlayerId'] != 0) & (shot_df['shooterPlayerId'].notna())]
-shot_df['shooterPlayerId'] = shot_df['shooterPlayerId'].astype(int)
 
-game_log_df = game_log_df['gameId'].apply(lambda x: f'{int(str(x)[:4])}0{int(str(x)[4:]):04d}')
+# Converting the string of playerID's to integers to merge
+shot_df['shooterPlayerId'] = shot_df['shooterPlayerId'].astype(int)
+print(shot_df.dtypes)
+
+# Converted `gameId` to an object so that datatype matches with other df
+game_log_df['gameId'] = game_log_df['gameId'].apply(lambda x: f'{int(str(x)[:4])}0{int(str(x)[4:]):04d}')
+print(game_log_df.dtypes)
 
 merged_df = pd.merge(
     game_log_df,
@@ -47,7 +57,7 @@ merged_df = pd.merge(
     left_on = 'gameId',
     right_on = 'shot_game_ID',
     how = 'left',
-    suffixes=('_shot','_game')
+    suffixes=('_player','_team')
 )
 print('Merged Dataframe')
 print(merged_df.head())
@@ -73,8 +83,8 @@ repeated_measures_df = merged_df.groupby(['shooterPlayerId', 'shot_game_ID', 'sh
 print("Repeated Measures DataFrame")
 print(repeated_measures_df.head())
 
-repeated_measures_df['season'] = repeated_measures_df['season'].astype('category')
+repeated_measures_df['season_player'] = repeated_measures_df['season_player'].astype('category')
 
-model_1 = smf.mixedlm("goal ~ xGoal + shotWasOnGoal", repeated_measures_df, groups=repeated_measures_df['season'])
-result = model_1.fit()
+model_1 = smf.mixedlm("goal ~ xGoal + shotWasOnGoal", repeated_measures_df, groups=repeated_measures_df['season_player'])
+result = model_1.fit(method=['lbfgs'])
 print(result.summary())
