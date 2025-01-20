@@ -5,7 +5,8 @@ from pymongo.server_api import ServerApi
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
-import pprint
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 
 
@@ -61,7 +62,7 @@ merged_df = pd.merge(
 )
 print('Merged Dataframe')
 print(merged_df.head())
-
+merged_df['team_code'] = merged_df.apply(lambda x: x['homeTeamCode'] if x['isHomeTeam'] == 1 else x['awayTeamCode'], axis=1)
 duplicates = merged_df.duplicated(subset=['shooterPlayerId', 'shot_game_ID', 'shotID'])
 print(f"Number of exact duplicates: {duplicates.sum()}")
 merged_df = merged_df.drop_duplicates(subset=['shooterPlayerId', 'shot_game_ID', 'shotID'])
@@ -70,21 +71,97 @@ duplicate_check = merged_df.groupby(['shooterPlayerId', 'shot_game_ID', 'shotID'
 
 
 
-ordered_columns = ['shooterPlayerId', 'shot_game_ID', 'shotID'] + \
-                  [col for col in merged_df.columns if col not in ['shooterPlayerId', 'shot_game_ID', 'shotID']]
+ordered_columns = ['season_player','team_code', 'shooterPlayerId', 'shot_game_ID', 'shotID'] + \
+                  [col for col in merged_df.columns if col not in ['season_player','team_code', 'shooterPlayerId', 'shot_game_ID', 'shotID']]
 merged_df = merged_df[ordered_columns]
 
+print(merged_df.head(10))
+print(merged_df.columns)
 
-# Step 3: Group by shooterPlayerId and shot_game_ID (repeated measures structure)
-repeated_measures_df = merged_df.groupby(['shooterPlayerId', 'shot_game_ID', 'shotID']).apply(
-    lambda x: x.reset_index(drop=True)
-).reset_index(drop=True)
+# Group by shooterPlayerId and shot_game_ID (repeated measures structure)
+repeated_measures_df = merged_df.copy()
 
 print("Repeated Measures DataFrame")
-print(repeated_measures_df.head())
+print(repeated_measures_df.head(10))
 
+# Creating composite grouping variables
+repeated_measures_df['season_team'] = repeated_measures_df['season_player'].astype(str) + '_' + repeated_measures_df['team_code'].astype(str)
+repeated_measures_df['season_team_player'] = repeated_measures_df['season_team'].astype(str) + '_' + repeated_measures_df['shooterPlayerId'].astype(str)
+repeated_measures_df['season_team_game'] = repeated_measures_df['season_team'].astype(str) + '_' + repeated_measures_df['shot_game_ID'].astype(str)
+
+# Converting categorical variables into the appropriate datatype
 repeated_measures_df['season_player'] = repeated_measures_df['season_player'].astype('category')
+repeated_measures_df['homeTeamCode'] = repeated_measures_df['homeTeamCode'].astype('category')
+repeated_measures_df['awayTeamCode'] = repeated_measures_df['awayTeamCode'].astype('category')
+repeated_measures_df['shooterPlayerId'] = repeated_measures_df['shooterPlayerId'].astype('category')
+repeated_measures_df['shot_game_ID'] = repeated_measures_df['shot_game_ID'].astype('category')
+repeated_measures_df['season_team'] = repeated_measures_df['season_team'].astype('category')
+repeated_measures_df['season_team_player'] = repeated_measures_df['season_team_player'].astype('category')
+repeated_measures_df['season_team_game'] = repeated_measures_df['season_team_game'].astype('category')
+repeated_measures_df['shotWasOnGoal'] = repeated_measures_df['shotWasOnGoal'].astype('category')
 
+print(repeated_measures_df[['season_team', 'team_code']].head(15))
+
+repeated_measures_df = repeated_measures_df.drop(columns=['homeTeamCode', 'awayTeamCode', 'gameId'])
+
+deduplicated_data = repeated_measures_df[['season_team', 'shot_game_ID', 'team_code', 'goal', 'xGoal']].drop_duplicates()
+
+# Attemping to create a new dataframe with summed values for goal and xGoal
+'''
+game_level_data = (deduplicated_data.groupby(
+    ['season_team', 'shot_game_ID','team_code'], as_index=False)
+    .agg({
+        'goal':'sum',
+        'xGoal':'sum'
+    })
+)
+''' 
+
+game_level_data = repeated_measures_df.sort_values(['season_team','shot_game_ID'])
+
+# 7-game rolling average for expected goals
+game_level_data['xGoal_rolling_avg'] = (
+    game_level_data.groupby('season_team')['xGoal']
+    .rolling(window=7, min_periods=1)
+    .mean()
+    .reset_index(level=0, drop=True)
+)
+
+# 7-game rolling average for goals
+game_level_data['goal_rolling_avg'] = (
+    game_level_data.groupby('season_team')['goal']
+    .rolling(window=7, min_periods=1)
+    .mean()
+    .reset_index(level=0, drop=True)
+)
+
+# Subsetting dataframe to only select teams from 2022 season
+test_filter = game_level_data['season_team'].where(game_level_data['season_team'].str.startswith('2022_'))
+
+# Multilevel Model with xGoal and SOG as predictors
 model_1 = smf.mixedlm("goal ~ xGoal + shotWasOnGoal", repeated_measures_df, groups=repeated_measures_df['season_player'])
 result = model_1.fit(method=['lbfgs'])
 print(result.summary())
+
+'''
+model_2 = smf.mixedlm("goal ~ xGoal + shotWasOnGoal + isHomeTeam",
+                      repeated_measures_df,
+                      groups = 'season_team_player',
+                      re_formula = '~xGoal + shotWasOnGoal',
+                      vc_formula = {
+                          'season': '0 + C(season_player)',
+                          'team' : '0 + C(season_team)',
+                          'game' : '0 + C(shot_game_ID)'
+                      })
+#result_2 = model_2.fit(method='lbfgs', maxiter=1000, tol=1e-6)
+#print(result_2.summary())
+'''
+'''
+fig = sns.scatterplot(x='xGoal_rolling_avg', y='goal_rolling_avg',
+                data=test_filter,
+                hue='season_team',
+                palette='husl',
+                alpha=0.5)
+
+plt.show()
+'''

@@ -183,7 +183,7 @@ shot_zip_files = ['https://peter-tanner.com/moneypuck/downloads/shots_2022.zip',
 
 shot_log = db['shot_log']
 
-columns_to_extract = ['shooterPlayerId', 'xGoal', 'shotWasOnGoal','goal', 'homeTeamCode', 'awayTeamCode', 'shotID', 'season', 'game_id']
+columns_to_extract = ['shooterPlayerId', 'xGoal', 'shotWasOnGoal','goal','isHomeTeam', 'homeTeamCode', 'awayTeamCode', 'shotID', 'season', 'game_id']
 
 def zip_process (zip_url):
     try:
