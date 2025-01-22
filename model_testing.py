@@ -48,3 +48,5 @@ r2_test = r2_score(y_test, pred_test_lin)
 
 print(f"Training Data:\n MAE: {mae_train:.2f}, MSE: {mse_train:.2f}, R²: {r2_train:.2f}")
 print(f"Testing Data:\n MAE: {mae_test:.2f}, MSE: {mse_test:.2f}, R²: {r2_test:.2f}")
+
+
